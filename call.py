@@ -9,6 +9,7 @@ import uuid
 from datetime import datetime, timezone
 from dotenv import load_dotenv
 import requests
+from linkedin_automation import send_linkedin_message
 
 load_dotenv()
 
@@ -18,11 +19,6 @@ app = FastAPI()
 api_key = os.getenv("LIVEKIT_API_KEY")
 api_secret = os.getenv("LIVEKIT_API_SECRET")
 livekit_url = os.getenv("LIVEKIT_URL", "http://localhost:7880")
-
-# Waalaxy configuration
-waalaxy_username = os.getenv("WAALAXY_USERNAME")
-waalaxy_password = os.getenv("WAALAXY_PASSWORD")
-waalaxy_api_url = os.getenv("WAALAXY_API_URL", "https://api.waalaxy.com/api")
 
 class CallRequest(BaseModel):
     user_name: str
@@ -103,75 +99,44 @@ async def initiate_call(request: CallRequest):
         await lkapi.aclose()
 
 @app.post("/send_linkedin_message")
-async def send_linkedin_message(request: LinkedInMessageRequest):
+async def api_send_linkedin_message(request: LinkedInMessageRequest):
     """
-    Send a follow-up LinkedIn message to a prospect after a call
+    Send a follow-up LinkedIn message to a prospect after a call using Selenium
     """
-    if not waalaxy_username or not waalaxy_password:
-        raise HTTPException(
-            status_code=500,
-            detail="Waalaxy credentials not configured"
-        )
-    
     try:
-        # First, authenticate with Waalaxy
-        auth_payload = {
-            "username": waalaxy_username,
-            "password": waalaxy_password
-        }
-        
-        auth_response = requests.post(
-            f"{waalaxy_api_url}/auth/login",
-            json=auth_payload
+        if not request.linkedin_profile_url:
+            raise HTTPException(
+                status_code=400,
+                detail="LinkedIn profile URL is required"
+            )
+            
+        # Format the message with the user's name
+        formatted_message = request.message_content.format(
+            user_name=request.user_name,
+            call_reference=request.call_reference
+        )
+            
+        # Send the message using Selenium automation
+        result = send_linkedin_message(
+            request.linkedin_profile_url,
+            formatted_message
         )
         
-        if auth_response.status_code != 200:
-            raise HTTPException(
-                status_code=auth_response.status_code,
-                detail=f"Waalaxy authentication failed: {auth_response.text}"
-            )
-        
-        # Extract session cookie or token from response
-        session_data = auth_response.json()
-        session_token = session_data.get("token", "")
-
-        # Prepare the message request for Waalaxy API
-        waalaxy_payload = {
-            "profileUrl": request.linkedin_profile_url,
-            "message": request.message_content.format(
-                user_name=request.user_name,
-                call_reference=request.call_reference
-            ),
-            "campaign": "Cold Call Follow-up"
-        }
-        
-        # Send the message using Waalaxy API
-        headers = {
-            "Cookie": f"session={session_token}",  # Or use appropriate header based on Waalaxy docs
-            "Content-Type": "application/json"
-        }
-        
-        response = requests.post(
-            f"{waalaxy_api_url}/messages/send",
-            json=waalaxy_payload,
-            headers=headers
-        )
-        
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=response.status_code,
-                detail=f"Waalaxy API error: {response.text}"
-            )
-        
-        return {
-            "message": "LinkedIn follow-up message sent successfully",
-            "details": {
-                "linkedin_profile": request.linkedin_profile_url,
-                "user_name": request.user_name,
-                "call_reference": request.call_reference,
-                "timestamp": datetime.now(timezone.utc).isoformat()
+        if result["status"] == "success":
+            return {
+                "message": "LinkedIn follow-up message sent successfully",
+                "details": {
+                    "linkedin_profile": request.linkedin_profile_url,
+                    "user_name": request.user_name,
+                    "call_reference": request.call_reference,
+                    "timestamp": datetime.now(timezone.utc).isoformat()
+                }
             }
-        }
+        else:
+            raise HTTPException(
+                status_code=500,
+                detail=f"LinkedIn automation error: {result['message']}"
+            )
         
     except Exception as e:
         raise HTTPException(
