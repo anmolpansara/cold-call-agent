@@ -1,0 +1,16 @@
+fastapi==0.115.12
+livekit==1.0.8
+livekit_agents==1.0.22
+livekit_api==1.0.2
+livekit_plugins_deepgram==1.0.22
+livekit_plugins_openai==1.0.22
+livekit_plugins_silero==1.0.22
+livekit-plugins-google==1.0.22
+livekit-plugins-noise_cancellation==0.2.4
+livekit_protocol==1.0.3
+uvicorn==0.34.2
+python-dotenv==1.1.0
+pydantic==2.11.3
+streamlit
+pandas==2.1.4
+setuptools
