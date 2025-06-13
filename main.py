@@ -40,12 +40,6 @@ def main():
                 help="Customer's phone number with country code"
             )
             
-            linkedin_url = st.text_input(
-                "LinkedIn URL (Optional)",
-                placeholder="https://www.linkedin.com/in/username",
-                help="Customer's LinkedIn profile URL for follow-up message"
-            )
-            
             # Submit button
             submitted = st.form_submit_button(
                 "🚀 Make Call",
@@ -57,19 +51,7 @@ def main():
                 if not user_name or not phone_number:
                     st.error("❌ Please fill in both customer name and phone number")
                 else:
-                    call_result = initiate_call(user_name, phone_number)
-                    
-                    # Store LinkedIn URL in session state for potential follow-up
-                    if call_result and linkedin_url:
-                        if "recent_calls" not in st.session_state:
-                            st.session_state.recent_calls = []
-                            
-                        st.session_state.recent_calls.append({
-                            "name": user_name,
-                            "phone": phone_number,
-                            "linkedin_url": linkedin_url,
-                            "call_reference": call_result.get("call_details", {}).get("room_name", "unknown")
-                        })
+                    initiate_call(user_name, phone_number)
     
     # Tab 2: CSV Upload
     with tab2:
@@ -80,7 +62,7 @@ def main():
         📝 CSV file should contain at least two columns:
         - **name**: Customer's name
         - **phone**: Phone number with country code
-        - **linkedin_url**: (Optional) LinkedIn profile URL for follow-up
+        - **linkedin_url**: (Optional) LinkedIn profile URL
         - **industry**: (Optional) Industry of the customer
         
         Example:
@@ -153,28 +135,13 @@ def main():
                                 call_progress = st.progress(0)
                                 status_container = st.container()
                                 
-                                # Initialize session state for storing call results
-                                if "recent_calls" not in st.session_state:
-                                    st.session_state.recent_calls = []
-                                
                                 for i, idx in enumerate(selected_indices):
                                     contact = df.iloc[idx]
                                     contact_name = contact['name']
                                     contact_phone = contact['phone']
-                                    contact_linkedin = contact.get('linkedin_url', '') if 'linkedin_url' in df.columns else ''
                                     
                                     status_container.text(f"Calling {contact_name} at {contact_phone}...")
-                                    call_result = initiate_call(contact_name, contact_phone)
-                                    
-                                    # Store call information for potential LinkedIn follow-up
-                                    if call_result:
-                                        call_reference = call_result.get("call_details", {}).get("room_name", "unknown")
-                                        st.session_state.recent_calls.append({
-                                            "name": contact_name,
-                                            "phone": contact_phone,
-                                            "linkedin_url": contact_linkedin,
-                                            "call_reference": call_reference
-                                        })
+                                    initiate_call(contact_name, contact_phone)
                                     
                                     # Update progress
                                     progress = (i + 1) / len(selected_indices)
@@ -205,49 +172,6 @@ def main():
             
             except Exception as e:
                 st.error(f"❌ Error processing CSV: {str(e)}")
-    
-    # LinkedIn Follow-up Section (appears after calls have been made)
-    if "recent_calls" in st.session_state and st.session_state.recent_calls:
-        st.markdown("---")
-        st.header("📱 LinkedIn Follow-up Messages")
-        st.markdown("Send follow-up messages to contacts you've called via LinkedIn")
-
-        # Filter only contacts with LinkedIn URLs
-        linkedin_contacts = [contact for contact in st.session_state.recent_calls if contact.get("linkedin_url")]
-        
-        if not linkedin_contacts:
-            st.info("No contacts with LinkedIn URLs available for follow-up")
-        else:
-            # Create a selectbox for choosing a contact
-            contact_options = [f"{contact['name']} - {contact['linkedin_url']}" for contact in linkedin_contacts]
-            selected_contact_idx = st.selectbox("Select contact for LinkedIn follow-up:", range(len(contact_options)), 
-                                              format_func=lambda x: contact_options[x])
-            selected_contact = linkedin_contacts[selected_contact_idx]
-            
-            with st.form("linkedin_form"):
-                # Message template with variables
-                default_message = f"Hello {{{selected_contact['name']}}},\n\nThank you for our conversation regarding the 2026 Intercontinental Commodity Exchange in Dubai. I'd like to provide some additional information about the event and discuss how you can participate.\n\nLooking forward to connecting further.\n\nBest regards,\nICE Dubai Team"
-                
-                message_content = st.text_area(
-                    "LinkedIn Message",
-                    value=default_message,
-                    height=200,
-                    help="You can use {user_name} as a placeholder for the contact's name"
-                )
-                
-                send_button = st.form_submit_button("📤 Send LinkedIn Message", type="primary", use_container_width=True)
-                
-                if send_button:
-                    result = send_linkedin_followup(
-                        selected_contact["linkedin_url"],
-                        message_content,
-                        selected_contact["call_reference"],
-                        selected_contact["name"]
-                    )
-                    if result and result.get("message"):
-                        st.success(f"✅ {result.get('message')}")
-                    else:
-                        st.error("❌ Failed to send LinkedIn message")
 
 def initiate_call(user_name: str, phone_number: str):
     """
@@ -281,11 +205,10 @@ def initiate_call(user_name: str, phone_number: str):
                 st.success(f"✅ Call to {user_name} initiated successfully!")
                 
                 st.info("💡 The agent will now dial the provided number and attempt to make the cold call.")
-                return result
+                
             else:
                 error_detail = response.json().get("detail", "Unknown error")
                 st.error(f"❌ Failed to initiate call: {error_detail}")
-                return None
                 
         except requests.exceptions.ConnectionError:
             st.error("❌ Cannot connect to backend. Make sure the FastAPI server is running on port 8000.")
@@ -293,46 +216,6 @@ def initiate_call(user_name: str, phone_number: str):
             st.error("❌ Request timed out. Please try again.")
         except Exception as e:
             st.error(f"❌ An error occurred: {str(e)}")
-    
-    return None
-
-def send_linkedin_followup(linkedin_url, message_content, call_reference, user_name):
-    """
-    Send a LinkedIn follow-up message
-    """
-    with st.spinner("📤 Sending LinkedIn message..."):
-        try:
-            # Prepare request payload
-            payload = {
-                "linkedin_profile_url": linkedin_url,
-                "message_content": message_content,
-                "call_reference": call_reference,
-                "user_name": user_name
-            }
-            
-            # Make API request
-            response = requests.post(
-                f"{API_BASE_URL}/send_linkedin_message",
-                json=payload,
-                timeout=60  # LinkedIn automation might take longer
-            )
-            
-            if response.status_code == 200:
-                return response.json()
-            else:
-                error_detail = response.json().get("detail", "Unknown error")
-                st.error(f"❌ Failed to send LinkedIn message: {error_detail}")
-                return None
-                
-        except requests.exceptions.ConnectionError:
-            st.error("❌ Cannot connect to backend. Make sure the FastAPI server is running on port 8000.")
-            return None
-        except requests.exceptions.Timeout:
-            st.error("❌ Request timed out. The LinkedIn automation might still be running in the background.")
-            return None
-        except Exception as e:
-            st.error(f"❌ An error occurred: {str(e)}")
-            return None
 
 def schedule_bulk_calls(df, scheduled_datetime):
     """
@@ -346,16 +229,10 @@ def schedule_bulk_calls(df, scheduled_datetime):
         # Get contact information
         contacts = []
         for _, row in df.iterrows():
-            contact_info = {
+            contacts.append({
                 "user_name": row['name'],
                 "phone_number": row['phone']
-            }
-            
-            # Add LinkedIn URL if available
-            if 'linkedin_url' in df.columns and not pd.isna(row['linkedin_url']):
-                contact_info["linkedin_url"] = row['linkedin_url']
-                
-            contacts.append(contact_info)
+            })
         
         # Store in session state
         st.session_state.scheduled_calls.append({
@@ -367,6 +244,17 @@ def schedule_bulk_calls(df, scheduled_datetime):
         # Show scheduled call information
         st.info(f"📅 Calls scheduled for {scheduled_datetime.strftime('%Y-%m-%d %H:%M')}")
         st.warning("⚠️ Note: This is a local schedule only. Backend implementation for scheduling is required to make actual calls at the scheduled time.")
+        
+        # Create a placeholder for integrating with a real backend
+        st.code("""
+# Backend API endpoint needed (FastAPI example):
+@app.post("/schedule_bulk_calls")
+async def schedule_bulk_calls(request: ScheduleBulkCallsRequest):
+    # Process the scheduling request
+    # Store in database
+    # Set up job scheduler (e.g., Celery, APScheduler)
+    return {"status": "success", "scheduled_calls": len(request.contacts)}
+""", language="python")
         
         return True
         
@@ -384,7 +272,6 @@ with st.sidebar:
     - 🗣️ Uses natural voice conversation
     - 🤝 Presents event details and handles objections
     - 📈 Secures participation for the Dubai Commodity Exchange
-    - 📱 Sends LinkedIn follow-up messages
     
     """)
     
